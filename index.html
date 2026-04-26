@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kalshi Props Modeler</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg2: #13131a;
+  --bg3: #1c1c26;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.13);
+  --text: #f0eff8;
+  --muted: #7a7a9a;
+  --accent: #7c6dfa;
+  --accent2: #38d9a0;
+  --warn: #f5a623;
+  --danger: #f05c5c;
+  --success: #38d9a0;
+  --mono: 'DM Mono', monospace;
+  --head: 'Syne', sans-serif;
+  --body: 'Inter', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body { background: var(--bg); color: var(--text); font-family: var(--body); min-height: 100vh; }
+
+.header {
+  border-bottom: 1px solid var(--border);
+  padding: 20px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.logo { font-family: var(--head); font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.logo span { color: var(--accent); }
+.api-bar { display: flex; gap: 8px; align-items: center; }
+.api-bar input {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 12px;
+  width: 300px;
+  outline: none;
+}
+.api-bar input:focus { border-color: var(--accent); }
+.api-status { font-size: 11px; color: var(--muted); }
+.api-status.ok { color: var(--success); }
+.api-status.err { color: var(--danger); }
+
+.layout { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 61px); }
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 20px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.sidebar-title { font-family: var(--head); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+
+.search-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.search-row input {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+}
+.search-row input:focus { border-color: var(--accent); }
+
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: opacity .15s;
+  white-space: nowrap;
+}
+.btn:hover { opacity: .85; }
+.btn:disabled { opacity: .35; cursor: not-allowed; }
+.btn-ghost {
+  background: none;
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: 8px;
+  font-family: var(--body);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background .15s;
+}
+.btn-ghost:hover { background: var(--bg3); }
+.btn-danger { background: none; border: 1px solid rgba(240,92,92,.4); color: var(--danger); border-radius: 6px; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+.btn-danger:hover { background: rgba(240,92,92,.1); }
+.btn-add { background: rgba(124,109,250,.15); border: 1px solid rgba(124,109,250,.3); color: var(--accent); border-radius: 6px; font-size: 11px; padding: 3px 10px; cursor: pointer; }
+.btn-add:hover { background: rgba(124,109,250,.25); }
+.btn-sm { background: rgba(56,217,160,.12); border: 1px solid rgba(56,217,160,.3); color: var(--accent2); border-radius: 6px; font-size: 11px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+.btn-sm:hover { background: rgba(56,217,160,.22); }
+
+.player-list { display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto; margin-bottom: 14px; }
+.player-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color .15s;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.player-item:hover, .player-item.selected { border-color: var(--accent2); }
+.player-item-name { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+.player-item-meta { font-size: 11px; color: var(--muted); }
+.player-item-action { display: flex; gap: 4px; margin-top: 4px; }
+
+.slot-list { display: flex; flex-direction: column; gap: 8px; }
+.slot {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+.slot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.slot-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.slot-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.slot-empty { color: var(--muted); font-size: 12px; font-style: italic; }
+.prop-table { width: 100%; border-collapse: collapse; }
+.prop-table th { font-size: 10px; color: var(--muted); text-align: left; padding: 2px 4px; text-transform: uppercase; letter-spacing: .05em; }
+.prop-table td { padding: 3px 4px; font-size: 12px; }
+.prop-table input { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 12px; padding: 2px 5px; width: 52px; outline: none; }
+.prop-table input:focus { border-color: var(--accent); }
+.spread-chip {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.spread-tight { background: rgba(56,217,160,.15); color: var(--accent2); }
+.spread-med { background: rgba(245,166,35,.15); color: var(--warn); }
+.spread-wide { background: rgba(240,92,92,.15); color: var(--danger); }
+
+.main { padding: 24px 28px; overflow-y: auto; }
+.main-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.page-title { font-family: var(--head); font-size: 22px; font-weight: 700; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab { padding: 8px 16px; font-size: 13px; color: var(--muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-family: var(--body); transition: color .15s; margin-bottom: -1px; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); }
+
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.metric { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.metric-val { font-size: 26px; font-weight: 600; font-family: var(--head); }
+.metric-val.green { color: var(--success); }
+.metric-val.amber { color: var(--warn); }
+.metric-val.red { color: var(--danger); }
+.metric-val.accent { color: var(--accent); }
+.metric-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+.card-title { font-family: var(--head); font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; }
+
+.target-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.field input, .field select {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  min-width: 90px;
+}
+.field input:focus, .field select:focus { border-color: var(--accent); }
+
+.result-banner {
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.banner-edge { background: rgba(56,217,160,.1); border: 1px solid rgba(56,217,160,.3); }
+.banner-marginal { background: rgba(245,166,35,.1); border: 1px solid rgba(245,166,35,.3); }
+.banner-noedge { background: rgba(240,92,92,.08); border: 1px solid rgba(240,92,92,.25); }
+
+.chart-wrap { position: relative; width: 100%; height: 260px; margin-bottom: 8px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.chart-legend span { display: flex; align-items: center; gap: 5px; }
+.legend-box { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.legend-line { width: 14px; height: 2px; flex-shrink: 0; }
+
+.book-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.book-row input { background: var(--bg3); border: 1px solid var(--border2); border-radius: 7px; color: var(--text); font-family: var(--body); font-size: 13px; padding: 6px 10px; outline: none; }
+.book-row input:focus { border-color: var(--accent); }
+
+.book-comparison { display: flex; flex-direction: column; gap: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.book-comparison-row {
+  display: grid;
+  grid-template-columns: 130px 80px 100px 110px 120px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  transition: background .12s;
+}
+.book-comparison-row:last-child { border-bottom: none; }
+.book-comparison-row:hover { background: var(--bg3); }
+.book-comparison-row.header { background: var(--bg3); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.book-name { font-weight: 500; }
+.edge-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.pill-green { background: rgba(56,217,160,.15); color: var(--success); }
+.pill-amber { background: rgba(245,166,35,.15); color: var(--warn); }
+.pill-red { background: rgba(240,92,92,.15); color: var(--danger); }
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+.empty-state .big { font-size: 40px; margin-bottom: 12px; opacity: .4; }
+.empty-state p { font-size: 14px; line-height: 1.7; }
+
+.loading { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+.dot-bounce { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bounce .8s infinite; }
+.dot-bounce:nth-child(2) { animation-delay: .15s; }
+.dot-bounce:nth-child(3) { animation-delay: .3s; }
+@keyframes bounce { 0%,80%,100%{transform:scale(0.7);opacity:.5} 40%{transform:scale(1);opacity:1} }
+
+.mono { font-family: var(--mono); }
+.info-box { background: rgba(124,109,250,.08); border: 1px solid rgba(124,109,250,.25); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: rgba(180,174,255,.9); margin-bottom: 14px; line-height: 1.6; }
+.scrollable { max-height: 380px; overflow-y: auto; }
+.slot-colors { --c0:#7c6dfa; --c1:#38d9a0; --c2:#f5a623; }
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Kalshi <span>Props</span> Modeler</div>
+  <div class="api-bar">
+    <input type="password" id="apiKey" placeholder="Paste Kalshi API key..." />
+    <button class="btn" onclick="fetchProps()">Fetch markets</button>
+    <span class="api-status" id="apiStatus"></span>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-title">Market search</div>
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="Search player name..." onkeydown="if(event.key==='Enter')fetchProps()" />
+    </div>
+    <div id="sidebarContent">
+      <div class="empty-state">
+        <div class="big">⚡</div>
+        <p>Enter your Kalshi API key above and click "Fetch markets" to load live NBA player prop markets.</p>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+      <div class="sidebar-title">Model slots</div>
+      <div class="slot-list" id="slotList"></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="tabs">
+      <button class="tab on" onclick="switchTab('model',this)">Distribution model</button>
+      <button class="tab" onclick="switchTab('parlay',this)">Parlay analyzer</button>
+      <button class="tab" onclick="switchTab('manual',this)">Manual entry</button>
+    </div>
+
+    <div id="tab-model">
+      <div class="info-box">
+        Load players from the sidebar into slots 1–3. The model reconstructs each player's full scoring distribution via <strong>isotonic regression</strong> weighted by bid/ask spread, then convolves the distributions to find your combined total probability.
+      </div>
+
+      <div class="card">
+        <div class="card-title">Target &amp; comparison</div>
+        <div class="target-row">
+          <div class="field">
+            <label>Combined pts target</label>
+            <input type="number" id="combTarget" value="60" min="1" max="200" step="1" oninput="runModel()" style="width:80px" />
+          </div>
+          <div class="field">
+            <label>DraftKings odds</label>
+            <input type="number" id="oddsKings" value="-130" style="width:90px" oninput="runModel()" />
+          </div>
+          <div class="field">
+            <label>FanDuel odds</label>
+            <input type="number" id="oddsDuel" value="-125" style="width:90px" oninput="runModel()" />
+          </div>
+          <div class="field">
+            <label>Fanatics odds</label>
+            <input type="number" id="oddsFanatics" value="-135" style="width:90px" oninput="runModel()" />
+          </div>
+          <div class="field">
+            <label>Custom odds</label>
+            <input type="number" id="oddsCustom" value="" placeholder="e.g. +110" style="width:90px" oninput="runModel()" />
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics-grid" id="metricsArea">
+        <div class="metric"><div class="metric-label">Model probability</div><div class="metric-val accent" id="m-prob">—</div></div>
+        <div class="metric"><div class="metric-label">Fair odds</div><div class="metric-val mono" id="m-fair" style="font-size:20px">—</div></div>
+        <div class="metric"><div class="metric-label">Best edge</div><div class="metric-val" id="m-edge">—</div></div>
+        <div class="metric"><div class="metric-label">Best EV / $100</div><div class="metric-val" id="m-ev">—</div></div>
+        <div class="metric"><div class="metric-label">Projected mean</div><div class="metric-val" id="m-mean">—</div></div>
+        <div class="metric"><div class="metric-label">Std deviation</div><div class="metric-val" id="m-std">—</div></div>
+      </div>
+
+      <div id="bannerArea"></div>
+
+      <div class="card">
+        <div class="card-title">Combined scoring distribution</div>
+        <div class="chart-legend" id="chartLegend"></div>
+        <div class="chart-wrap">
+          <canvas id="distChart" role="img" aria-label="Combined player scoring distribution showing probability of each total points outcome">Loading chart...</canvas>
+        </div>
+      </div>
+
+      <div class="card" id="bookCard" style="display:none">
+        <div class="card-title">Book comparison</div>
+        <div id="bookCompArea"></div>
+      </div>
+    </div>
+
+    <div id="tab-parlay" style="display:none">
+      <div class="card">
+        <div class="card-title">Add sportsbooks</div>
+        <div id="bookRowsArea"></div>
+        <button class="btn-add" onclick="addBook()" style="margin-top:8px">+ Add book</button>
+      </div>
+      <div id="parlayTableArea"></div>
+    </div>
+
+    <div id="tab-manual" style="display:none">
+      <div class="info-box">Manually enter player props without fetching from Kalshi. Enter each threshold (e.g. 15, 20, 25, 30) with bid and ask prices in cents (1–99).</div>
+      <div id="manualSlots"></div>
+      <button class="btn-ghost" onclick="renderManualSlots()" style="margin-top:4px">Refresh slots</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MAX = 80;
+const SLOT_COLORS = ['#7c6dfa','#38d9a0','#f5a623'];
+let slots = [null, null, null];
+let books = [
+  {id:'dk', name:'DraftKings', odds:'-130'},
+  {id:'fd', name:'FanDuel', odds:'-125'},
+  {id:'fn', name:'Fanatics', odds:'-135'},
+];
+let distChartInst = null;
+let lastCombined = null;
+let lastModelProb = null;
+
+function switchTab(id, el) {
+  ['model','parlay','manual'].forEach(t => document.getElementById('tab-'+t).style.display = t===id?'':'none');
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('on'));
+  el.classList.add('on');
+  if(id==='parlay') renderParlayTab();
+  if(id==='manual') renderManualSlots();
+}
+
+function uid(){ return Math.random().toString(36).slice(2,7); }
+
+function americanToProb(odds) {
+  odds = parseFloat(odds);
+  if(isNaN(odds)) return null;
+  if(odds > 0) return 100/(odds+100);
+  return Math.abs(odds)/(Math.abs(odds)+100);
+}
+
+function probToAmerican(p) {
+  if(p <= 0 || isNaN(p)) return 'N/A';
+  if(p >= 1) return '-9999';
+  if(p >= 0.5) return '-' + Math.round(p/(1-p)*100);
+  return '+' + Math.round((1-p)/p*100);
+}
+
+function isotonicRegression(xs, ys, ws) {
+  const n = xs.length;
+  if(!n) return [];
+  const idx = xs.map((_,i)=>i).sort((a,b)=>xs[a]-xs[b]);
+  const sy = idx.map(i=>ys[i]);
+  const sw = idx.map(i=>ws[i]);
+  const out = sy.slice();
+  let changed = true;
+  while(changed) {
+    changed = false;
+    for(let i=1;i<n;i++) {
+      if(out[i] > out[i-1]) {
+        const merged = (out[i-1]*sw[i-1] + out[i]*sw[i]) / (sw[i-1]+sw[i]);
+        out[i-1] = out[i] = merged;
+        changed = true;
+      }
+    }
+  }
+  const result = new Array(n);
+  idx.forEach((origI,si) => { result[origI] = out[si]; });
+  return result;
+}
+
+function buildDist(props) {
+  if(!props || props.length < 2) return null;
+  const sorted = props.slice().sort((a,b)=>a.threshold-b.threshold);
+  const thresholds = sorted.map(p=>p.threshold);
+  const mids = sorted.map(p=>((p.bid+p.ask)/2)/100);
+  const spreads = sorted.map(p=>Math.max(0, p.ask-p.bid));
+  const weights = spreads.map(s=>Math.max(0.05, 1-s/25));
+  const smoothed = isotonicRegression(thresholds, mids, weights);
+
+  const survival = new Float64Array(MAX+1).fill(0);
+  for(let pts=0;pts<=MAX;pts++) {
+    if(pts < thresholds[0]) {
+      const ratio = (thresholds[0]-pts)/thresholds[0];
+      survival[pts] = smoothed[0] + (1-smoothed[0]) * ratio;
+      survival[pts] = Math.min(1, survival[pts]);
+    } else if(pts > thresholds[thresholds.length-1]) {
+      const lastVal = smoothed[smoothed.length-1];
+      survival[pts] = lastVal * Math.exp(-0.18*(pts-thresholds[thresholds.length-1]));
+    } else {
+      let lo=-1, hi=-1;
+      for(let i=0;i<thresholds.length-1;i++) {
+        if(pts>=thresholds[i] && pts<=thresholds[i+1]) { lo=i; hi=i+1; break; }
+      }
+      if(lo>=0) {
+        const frac=(pts-thresholds[lo])/(thresholds[hi]-thresholds[lo]);
+        survival[pts]=smoothed[lo]*(1-frac)+smoothed[hi]*frac;
+      }
+    }
+    if(pts>0) survival[pts]=Math.max(0, Math.min(survival[pts-1], survival[pts]));
+  }
+
+  const pmf = new Float64Array(MAX+1);
+  for(let k=0;k<MAX;k++) pmf[k]=Math.max(0,survival[k]-survival[k+1]);
+  pmf[MAX]=survival[MAX];
+  const tot=pmf.reduce((s,v)=>s+v,0);
+  if(tot>0) for(let k=0;k<=MAX;k++) pmf[k]/=tot;
+  return {pmf, survival, thresholds, smoothed, weights, spreads};
+}
+
+function convolve(a, b) {
+  const out = new Float64Array(MAX+1).fill(0);
+  for(let i=0;i<=MAX;i++) {
+    if(!a[i]) continue;
+    for(let j=0;j<=MAX-i;j++) {
+      out[Math.min(MAX,i+j)] += a[i]*b[j];
+    }
+  }
+  return out;
+}
+
+function runModel() {
+  const activeDists = [];
+  for(let i=0;i<3;i++) {
+    if(slots[i] && slots[i].props && slots[i].props.length>=2) {
+      const d = buildDist(slots[i].props);
+      if(d) activeDists.push({dist:d, player:slots[i], color:SLOT_COLORS[i]});
+    }
+  }
+
+  if(!activeDists.length) {
+    clearResults();
+    return;
+  }
+
+  let combined = activeDists[0].dist.pmf.slice();
+  for(let i=1;i<activeDists.length;i++) combined = convolve(combined, activeDists[i].dist.pmf);
+  const norm = combined.reduce((s,v)=>s+v,0);
+  if(norm>0) for(let k=0;k<=MAX;k++) combined[k]/=norm;
+
+  const target = parseInt(document.getElementById('combTarget').value)||60;
+  let modelProb = 0;
+  for(let k=target;k<=MAX;k++) modelProb+=combined[k];
+  modelProb = Math.min(1,Math.max(0,modelProb));
+
+  let mean=0, variance=0;
+  for(let k=0;k<=MAX;k++) mean+=k*combined[k];
+  for(let k=0;k<=MAX;k++) variance+=Math.pow(k-mean,2)*combined[k];
+
+  const bookFields = [
+    {id:'oddsKings', name:'DraftKings'},
+    {id:'oddsDuel', name:'FanDuel'},
+    {id:'oddsFanatics', name:'Fanatics'},
+    {id:'oddsCustom', name:'Custom'},
+  ];
+
+  let bestEdge = null, bestEV = null, bestBookName = '';
+  const bookRows = [];
+  bookFields.forEach(bf => {
+    const val = document.getElementById(bf.id).value;
+    if(!val) return;
+    const odds = parseFloat(val);
+    if(isNaN(odds)) return;
+    const bp = americanToProb(odds);
+    if(!bp) return;
+    const edge = (modelProb-bp)*100;
+    const ev = odds>0 ? modelProb*(odds/100)-(1-modelProb) : modelProb*(100/Math.abs(odds))-(1-modelProb);
+    bookRows.push({name:bf.name, odds, bp, edge, ev});
+    if(bestEdge===null||edge>bestEdge){bestEdge=edge;bestEV=ev;bestBookName=bf.name;}
+  });
+
+  document.getElementById('m-prob').textContent = (modelProb*100).toFixed(1)+'%';
+  document.getElementById('m-fair').textContent = probToAmerican(modelProb);
+  document.getElementById('m-mean').textContent = mean.toFixed(1)+' pts';
+  document.getElementById('m-std').textContent = Math.sqrt(variance).toFixed(1)+' pts';
+
+  if(bestEdge!==null) {
+    const edgeEl = document.getElementById('m-edge');
+    edgeEl.textContent = (bestEdge>0?'+':'')+bestEdge.toFixed(1)+'%';
+    edgeEl.className = 'metric-val ' + (bestEdge>5?'green':bestEdge>0?'amber':'red');
+    const evEl = document.getElementById('m-ev');
+    evEl.textContent = (bestEV>0?'+':'')+'$'+(bestEV*100).toFixed(2);
+    evEl.className = 'metric-val ' + (bestEV>0?'green':'red');
+
+    const banner = document.getElementById('bannerArea');
+    if(bestEdge>2) {
+      banner.innerHTML=`<div class="result-banner banner-edge"><strong>${bestEdge.toFixed(1)}% edge on ${bestBookName}</strong> — model says ${(modelProb*100).toFixed(1)}% vs book's implied ${(americanToProb(bookRows.find(r=>r.name===bestBookName)?.odds||0)*100).toFixed(1)}%. EV: ${bestEV>0?'+':''}$${(bestEV*100).toFixed(2)} per $100. Positive expected value — consider betting.</div>`;
+    } else if(bestEdge>0) {
+      banner.innerHTML=`<div class="result-banner banner-marginal"><strong>Marginal edge (${bestEdge.toFixed(1)}%)</strong> on ${bestBookName}. Small positive expected value — proceed with caution.</div>`;
+    } else {
+      banner.innerHTML=`<div class="result-banner banner-noedge"><strong>No edge found.</strong> All books are priced at or above your model's ${(modelProb*100).toFixed(1)}% probability. Skip or wait for a line move.</div>`;
+    }
+
+    if(bookRows.length) {
+      const bookCard = document.getElementById('bookCard');
+      bookCard.style.display='';
+      let html='<div class="book-comparison">';
+      html+='<div class="book-comparison-row header"><span>Book</span><span>Odds</span><span>Implied prob</span><span>Edge</span><span>EV / $100</span><span>Verdict</span></div>';
+      bookRows.sort((a,b)=>b.edge-a.edge).forEach(r=>{
+        const pc = r.edge>5?'pill-green':r.edge>0?'pill-amber':'pill-red';
+        const verdict = r.edge>5?'Strong edge':r.edge>0?'Slight edge':'Skip';
+        html+=`<div class="book-comparison-row">
+          <span class="book-name">${r.name}</span>
+          <span class="mono">${r.odds>0?'+':''}${r.odds}</span>
+          <span>${(r.bp*100).toFixed(1)}%</span>
+          <span><span class="edge-pill ${pc}">${r.edge>0?'+':''}${r.edge.toFixed(1)}%</span></span>
+          <span style="color:${r.ev>0?'var(--success)':'var(--danger)'}">${r.ev>0?'+':''}$${(r.ev*100).toFixed(2)}</span>
+          <span style="font-size:12px;color:${r.edge>2?'var(--success)':r.edge>0?'var(--warn)':'var(--muted)'}">${verdict}</span>
+        </div>`;
+      });
+      html+='</div>';
+      document.getElementById('bookCompArea').innerHTML=html;
+    }
+  } else {
+    document.getElementById('m-edge').textContent='—';
+    document.getElementById('m-ev').textContent='—';
+    document.getElementById('bannerArea').innerHTML='';
+  }
+
+  lastCombined = combined;
+  lastModelProb = modelProb;
+  updateChart(combined, activeDists, target);
+}
+
+function clearResults() {
+  ['m-prob','m-fair','m-edge','m-ev','m-mean','m-std'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.textContent='—';el.className='metric-val';}
+  });
+  document.getElementById('bannerArea').innerHTML='';
+  document.getElementById('bookCard').style.display='none';
+  if(distChartInst){distChartInst.destroy();distChartInst=null;}
+  document.getElementById('chartLegend').innerHTML='';
+}
+
+function updateChart(combined, activeDists, target) {
+  const labels=[], combDataGreen=[], combDataGray=[];
+  for(let k=0;k<=MAX;k++) {
+    labels.push(k);
+    const pct = parseFloat((combined[k]*100).toFixed(3));
+    combDataGreen.push(k>=target?pct:null);
+    combDataGray.push(k<target?pct:null);
+  }
+
+  const datasets = [
+    {label:'Below target',data:combDataGray,backgroundColor:'rgba(122,122,154,0.25)',type:'bar',order:2,yAxisID:'y'},
+    {label:'Target zone ('+target+'+)',data:combDataGreen,backgroundColor:'rgba(56,217,160,0.55)',type:'bar',order:2,yAxisID:'y'},
+    ...activeDists.map((d,i)=>({
+      label: d.player.name,
+      data: Array.from(d.dist.pmf).map(v=>parseFloat((v*100).toFixed(3))),
+      borderColor: d.color,
+      backgroundColor:'transparent',
+      type:'line',
+      tension:0.45,
+      borderWidth:2,
+      pointRadius:0,
+      borderDash:i===0?[]:[6,3],
+      order:1,
+      yAxisID:'y',
+    }))
+  ];
+
+  if(distChartInst) distChartInst.destroy();
+  distChartInst = new Chart(document.getElementById('distChart'),{
+    type:'bar',
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${(c.parsed.y||0).toFixed(2)}%`}}},
+      scales:{
+        x:{ticks:{maxTicksLimit:20,color:'rgba(122,122,154,0.7)',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'}},
+        y:{ticks:{callback:v=>v.toFixed(1)+'%',color:'rgba(122,122,154,0.7)',font:{size:10}},grid:{color:'rgba(255,255,255,0.06)'}}
+      }
+    }
+  });
+
+  const legend = document.getElementById('chartLegend');
+  legend.innerHTML = `
+    <span><span class="legend-box" style="background:rgba(56,217,160,0.55)"></span>Target zone (${target}+)</span>
+    <span><span class="legend-box" style="background:rgba(122,122,154,0.25)"></span>Below target</span>
+    ${activeDists.map((d,i)=>`<span><span class="legend-line" style="background:${d.color}"></span>${d.player.name}</span>`).join('')}
+  `;
+}
+
+function renderSlots() {
+  const area = document.getElementById('slotList');
+  area.innerHTML = slots.map((s,i) => {
+    const color = SLOT_COLORS[i];
+    if(!s) return `<div class="slot">
+      <div class="slot-header">
+        <span class="slot-dot" style="background:${color}"></span>
+        <span class="slot-name">Slot ${i+1}</span>
+      </div>
+      <div class="slot-empty">Empty — load a player from above</div>
+    </div>`;
+    const propSummary = s.props.map(p=>`<span style="font-size:10px;color:var(--muted)">${p.threshold}+: <span class="mono" style="color:${color}">${((p.bid+p.ask)/2).toFixed(0)}¢</span></span>`).join('  ');
+    return `<div class="slot">
+      <div class="slot-header">
+        <div style="display:flex;align-items:center;gap:7px">
+          <span class="slot-dot" style="background:${color}"></span>
+          <span class="slot-name">${s.name}</span>
+        </div>
+        <button class="btn-danger" onclick="clearSlot(${i})">Clear</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px">${propSummary}</div>
+    </div>`;
+  }).join('');
+}
+
+function clearSlot(i) {
+  slots[i] = null;
+  renderSlots();
+  runModel();
+}
+
+function loadToSlot(player, slotIdx) {
+  slots[slotIdx] = JSON.parse(JSON.stringify(player));
+  renderSlots();
+  runModel();
+  document.querySelectorAll('.player-item').forEach(el => el.classList.remove('selected'));
+}
+
+async function fetchProps() {
+  const key = document.getElementById('apiKey').value.trim();
+  const search = document.getElementById('searchInput').value.trim();
+  const statusEl = document.getElementById('apiStatus');
+  const content = document.getElementById('sidebarContent');
+
+  if(!key) { alert('Enter your Kalshi API key first.'); return; }
+
+  statusEl.textContent = 'Fetching...';
+  statusEl.className = 'api-status';
+  content.innerHTML = '<div class="loading" style="padding:20px 0"><div class="dot-bounce"></div><div class="dot-bounce"></div><div class="dot-bounce"></div><span>Loading markets...</span></div>';
+
+  try {
+    const resp = await fetch('/api/kalshi/markets', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_key:key, search})
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Unknown error');
+
+    statusEl.textContent = `✓ ${data.total_markets} markets, ${data.players.length} players`;
+    statusEl.className = 'api-status ok';
+
+    if(!data.players.length) {
+      content.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">No player props found. Try searching for a specific player name, or check back on a game day.</div>';
+      return;
+    }
+
+    content.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">${data.players.length} players found — click to load into a slot</div>
+    <div class="player-list scrollable">
+      ${data.players.map(p=>`
+        <div class="player-item" id="pi-${p.event_ticker}">
+          <div>
+            <div class="player-item-name">${p.name}</div>
+            <div class="player-item-meta">${p.props.length} thresholds: ${p.props.map(x=>x.threshold+'+').join(', ')}</div>
+            <div class="player-item-action">
+              ${slots.map((s,i)=>`<button class="btn-sm" onclick="loadToSlot(${JSON.stringify(JSON.stringify(p))},${i})" style="--c:${SLOT_COLORS[i]}">→ Slot ${i+1}</button>`).join('')}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+
+    document.querySelectorAll('.btn-sm[onclick*="loadToSlot"]').forEach(btn=>{
+      btn.addEventListener('click',function(e){
+        const raw = this.getAttribute('onclick').match(/loadToSlot\((.*?),(\d)\)/);
+        if(raw) {
+          const player = JSON.parse(JSON.parse(raw[1]));
+          const slotIdx = parseInt(raw[2]);
+          loadToSlot(player, slotIdx);
+        }
+      });
+    });
+
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.className = 'api-status err';
+    content.innerHTML = `<div style="padding:12px;color:var(--danger);font-size:13px;background:rgba(240,92,92,.08);border-radius:8px;border:1px solid rgba(240,92,92,.25)">${e.message}</div>`;
+  }
+}
+
+function addBook(name='', odds='') {
+  books.push({id:uid(), name:name||'Book '+(books.length+1), odds:odds||'-110'});
+  renderParlayTab();
+}
+
+function removeBook(id) {
+  books = books.filter(b=>b.id!==id);
+  renderParlayTab();
+}
+
+function renderParlayTab() {
+  const rowsArea = document.getElementById('bookRowsArea');
+  rowsArea.innerHTML = books.map(b=>`
+    <div class="book-row">
+      <input value="${b.name}" style="width:130px" oninput="updateBook('${b.id}','name',this.value)" />
+      <input type="number" value="${b.odds}" style="width:90px;font-family:var(--mono)" placeholder="e.g. -130" oninput="updateBook('${b.id}','odds',this.value)" />
+      <span style="font-size:12px;color:var(--muted)">American odds</span>
+      <button class="btn-danger" onclick="removeBook('${b.id}')">Remove</button>
+    </div>
+  `).join('');
+
+  const tableArea = document.getElementById('parlayTableArea');
+  if(!lastModelProb) {
+    tableArea.innerHTML='<div style="color:var(--muted);font-size:13px;padding:12px 0">Build a model in the Distribution model tab first.</div>';
+    return;
+  }
+
+  const target = parseInt(document.getElementById('combTarget').value)||60;
+  let html = `<div class="card"><div class="card-title">Parlay comparison — combined ${target}+ pts, model: ${(lastModelProb*100).toFixed(1)}%</div>
+  <div class="book-comparison">
+  <div class="book-comparison-row header"><span>Book</span><span>Odds</span><span>Implied prob</span><span>Edge</span><span>EV / $100</span><span>Verdict</span></div>`;
+
+  const rows = books.map(b=>{
+    const bp = americanToProb(parseFloat(b.odds));
+    if(!bp) return null;
+    const edge = (lastModelProb-bp)*100;
+    const odds = parseFloat(b.odds);
+    const ev = odds>0?lastModelProb*(odds/100)-(1-lastModelProb):lastModelProb*(100/Math.abs(odds))-(1-lastModelProb);
+    return {name:b.name, odds, bp, edge, ev};
+  }).filter(Boolean).sort((a,b)=>b.edge-a.edge);
+
+  rows.forEach(r=>{
+    const pc=r.edge>5?'pill-green':r.edge>0?'pill-amber':'pill-red';
+    html+=`<div class="book-comparison-row">
+      <span class="book-name">${r.name}</span>
+      <span class="mono">${r.odds>0?'+':''}${r.odds}</span>
+      <span>${(r.bp*100).toFixed(1)}%</span>
+      <span><span class="edge-pill ${pc}">${r.edge>0?'+':''}${r.edge.toFixed(1)}%</span></span>
+      <span style="color:${r.ev>0?'var(--success)':'var(--danger)'}">${r.ev>0?'+':''}$${(r.ev*100).toFixed(2)}</span>
+      <span style="color:${r.edge>2?'var(--success)':r.edge>0?'var(--warn)':'var(--muted);font-size:12px'}">${r.edge>5?'Strong edge':r.edge>0?'Slight edge':'Skip'}</span>
+    </div>`;
+  });
+  html+='</div></div>';
+  tableArea.innerHTML=html;
+}
+
+function updateBook(id,field,val){
+  const b=books.find(x=>x.id===id);
+  if(b) b[field]=val;
+  if(lastModelProb) renderParlayTab();
+}
+
+function renderManualSlots() {
+  const area = document.getElementById('manualSlots');
+  area.innerHTML = slots.map((s,i)=>{
+    const color = SLOT_COLORS[i];
+    const props = s?s.props:[
+      {threshold:15,bid:65,ask:72},
+      {threshold:20,bid:42,ask:50},
+      {threshold:25,bid:22,ask:32},
+      {threshold:30,bid:8,ask:16},
+    ];
+    return `<div class="card" style="border-left:3px solid ${color}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-family:var(--head);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)">Slot ${i+1}</span>
+          <input id="mname-${i}" value="${s?s.name:'Player '+(i+1)}" style="font-size:14px;font-weight:500;background:none;border:none;color:var(--text);outline:none;width:160px" oninput="updateManualName(${i},this.value)" />
+        </div>
+        <button class="btn-add" onclick="addManualProp(${i})">+ Threshold</button>
+      </div>
+      <table class="prop-table" id="mtable-${i}">
+        <tr><th>Threshold</th><th>YES bid (¢)</th><th>YES ask (¢)</th><th>Spread</th><th>Weight</th><th></th></tr>
+        ${props.map((p,j)=>{
+          const spread=Math.max(0,p.ask-p.bid);
+          const weight=Math.max(0.05,1-spread/25);
+          const cls=spread<=5?'spread-tight':spread<=12?'spread-med':'spread-wide';
+          return `<tr>
+            <td><input type="number" value="${p.threshold}" style="width:52px" oninput="updateManualProp(${i},${j},'threshold',this.value)" /> +</td>
+            <td><input type="number" value="${p.bid}" style="width:52px" oninput="updateManualProp(${i},${j},'bid',this.value)" /></td>
+            <td><input type="number" value="${p.ask}" style="width:52px" oninput="updateManualProp(${i},${j},'ask',this.value)" /></td>
+            <td><span class="spread-chip ${cls}">${spread}¢</span></td>
+            <td style="color:var(--muted);font-size:12px">${(weight*100).toFixed(0)}%</td>
+            <td><button class="btn-danger" onclick="removeManualProp(${i},${j})">x</button></td>
+          </tr>`;
+        }).join('')}
+      </table>
+    </div>`;
+  }).join('');
+}
+
+function ensureSlot(i) {
+  if(!slots[i]) slots[i] = {name:'Player '+(i+1), props:[]};
+}
+
+function updateManualName(i,val){
+  ensureSlot(i);
+  slots[i].name=val;
+  renderSlots();
+}
+
+function updateManualProp(i,j,field,val){
+  ensureSlot(i);
+  if(!slots[i].props[j]) return;
+  slots[i].props[j][field]=parseFloat(val)||0;
+  renderManualSlots();
+  runModel();
+}
+
+function addManualProp(i){
+  ensureSlot(i);
+  const last=slots[i].props[slots[i].props.length-1];
+  slots[i].props.push({threshold:(last?last.threshold+5:10),bid:30,ask:40});
+  renderManualSlots();
+  runModel();
+}
+
+function removeManualProp(i,j){
+  ensureSlot(i);
+  slots[i].props.splice(j,1);
+  renderManualSlots();
+  runModel();
+}
+
+renderSlots();
+renderManualSlots();
+</script>
+</body>
+</html>
