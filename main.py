@@ -171,8 +171,7 @@ def get_markets():
         return jsonify({
             "players": result,
             "total_markets": len(all_markets),
-            "matched": len(result),
-            "nba_event_tickers": list(nba_event_tickers)
+            "matched": len(result)
         })
 
     except Exception as e:
