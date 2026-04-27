@@ -149,27 +149,43 @@ def get_markets():
     try:
         all_markets = []
 
-        # Fetch NBA markets directly using series_ticker on markets endpoint
-        for series in ["KXNBAGAME", "KXNBA", "KXNBAPLAYER"]:
+        # The individual player prop markets live under specific game event tickers
+        # e.g. KXNBAGAME-26APR27MINDEN for Game 5 MIN at DEN on Apr 27
+        # We need to find today's NBA game event tickers by scanning markets
+        # and looking for the kxnbagame pattern in event_ticker
+
+        # Step 1: Broad paginate to find KXNBAGAME event tickers
+        nba_event_tickers = set()
+        cursor = None
+        for _ in range(10):
+            params = {"limit": 200, "status": "open"}
+            if cursor:
+                params["cursor"] = cursor
             try:
-                cursor = None
-                for _ in range(5):
-                    params = {"series_ticker": series, "status": "open", "limit": 200}
-                    if cursor:
-                        params["cursor"] = cursor
-                    resp = kalshi_get("/trade-api/v2/markets", params)
-                    markets = resp.get("markets", [])
-                    all_markets.extend(markets)
-                    cursor = resp.get("cursor")
-                    if not cursor or not markets:
-                        break
+                resp = kalshi_get("/trade-api/v2/markets", params)
+                markets = resp.get("markets", [])
+                for m in markets:
+                    et = m.get("event_ticker", "")
+                    if "kxnbagame" in et.lower() or "nba" in et.lower():
+                        nba_event_tickers.add(et)
+                cursor = resp.get("cursor")
+                if not cursor or not markets:
+                    break
+            except:
+                break
+
+        # Step 2: Fetch all markets for each NBA game event
+        for et in list(nba_event_tickers)[:20]:
+            try:
+                resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 200})
+                all_markets.extend(resp.get("markets", []))
             except:
                 continue
 
-        # Fallback — broad pagination if series approach found nothing
+        # If we found nothing via event tickers, use everything from pagination
         if not all_markets:
             cursor = None
-            for _ in range(20):
+            for _ in range(10):
                 params = {"limit": 200, "status": "open"}
                 if cursor:
                     params["cursor"] = cursor
@@ -189,7 +205,7 @@ def get_markets():
             "players": result,
             "total_markets": len(all_markets),
             "matched": len(result),
-            "nba_events": len(nba_event_tickers)
+            "nba_event_tickers": list(nba_event_tickers)
         })
 
     except Exception as e:
@@ -218,13 +234,31 @@ def debug_events():
 @app.route("/api/debug/sample")
 def debug_sample():
     try:
-        resp = kalshi_get("/trade-api/v2/markets", {"limit": 30, "status": "open"})
-        return jsonify([{
-            "title": m.get("title"),
-            "subtitle": m.get("subtitle"),
-            "event_ticker": m.get("event_ticker"),
-            "ticker": m.get("ticker")
-        } for m in resp.get("markets", [])])
+        # Scan first 2000 markets for NBA event tickers
+        nba_tickers = set()
+        sample_titles = []
+        cursor = None
+        for _ in range(10):
+            params = {"limit": 200, "status": "open"}
+            if cursor:
+                params["cursor"] = cursor
+            resp = kalshi_get("/trade-api/v2/markets", params)
+            markets = resp.get("markets", [])
+            for m in markets:
+                et = m.get("event_ticker", "")
+                title = m.get("title", "")
+                if "kxnbagame" in et.lower() or "nba" in et.lower():
+                    nba_tickers.add(et)
+                if len(sample_titles) < 5:
+                    sample_titles.append({"title": title, "event_ticker": et})
+            cursor = resp.get("cursor")
+            if not cursor or not markets:
+                break
+        return jsonify({
+            "nba_event_tickers": list(nba_tickers),
+            "sample_titles": sample_titles,
+            "total_scanned": _*200
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
