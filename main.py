@@ -149,31 +149,47 @@ def get_markets():
     try:
         all_markets = []
 
-        # Individual NBA player prop markets live under KXMVENBASINGLEGAME event tickers
-        # First find all open events under this series, then fetch their markets
+        # NBA player props are embedded inside KXNBAGAME events
+        # Strategy: fetch today's KXNBAGAME events with nested markets
 
+        import datetime as dt
+        today = dt.datetime.utcnow()
+        tomorrow = today + dt.timedelta(days=1)
+
+        # Build candidate event tickers for today and tomorrow
+        # Format: KXNBAGAME-26APR27MINDEN
+        # We don't know the city codes, so fetch via events endpoint with with_nested_markets
         nba_event_tickers = set()
 
-        # Step 1: Scan markets to find KXMVENBASINGLEGAME event tickers
-        cursor = None
-        for _ in range(15):
-            params = {"limit": 200, "status": "open"}
-            if cursor:
-                params["cursor"] = cursor
-            try:
-                resp = kalshi_get("/trade-api/v2/markets", params)
-                markets = resp.get("markets", [])
-                for m in markets:
-                    et = m.get("event_ticker", "")
-                    if "kxmvenbasinglegame" in et.lower():
+        # Fetch events with nested markets directly
+        try:
+            path = "/trade-api/v2/events"
+            params = {"series_ticker": "KXNBAGAME", "status": "open", "limit": 100, "with_nested_markets": "true"}
+            query = urlencode(params)
+            full_url = f"https://api.elections.kalshi.com{path}?{query}"
+            import requests as req
+            ts = str(int(datetime.datetime.now().timestamp() * 1000))
+            sig = sign_pss(ts + "GET" + path)
+            headers = {
+                "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+                "KALSHI-ACCESS-SIGNATURE": sig,
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+                "Content-Type": "application/json"
+            }
+            r = req.get(full_url, headers=headers, timeout=20)
+            if r.ok:
+                data = r.json()
+                for event in data.get("events", []):
+                    et = event.get("event_ticker", "")
+                    if et:
                         nba_event_tickers.add(et)
-                cursor = resp.get("cursor")
-                if not cursor or not markets:
-                    break
-            except:
-                break
+                    # Extract nested markets directly
+                    for m in event.get("markets", []):
+                        all_markets.append(m)
+        except:
+            pass
 
-        # Step 2: Fetch all markets for each NBA single game event
+        # Also try fetching markets for each found event ticker
         for et in list(nba_event_tickers):
             try:
                 resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 200})
@@ -215,6 +231,33 @@ def debug_events():
 
 @app.route("/api/debug/sample")
 def debug_sample():
+    try:
+        results = {}
+        et = "KXNBAGAME-26APR27MINDEN"
+        # Fetch event with nested markets
+        path = f"/trade-api/v2/events/{et}"
+        full_url = f"https://api.elections.kalshi.com{path}?with_nested_markets=true"
+        import requests as req
+        ts = str(int(datetime.datetime.now().timestamp() * 1000))
+        sig = sign_pss(ts + "GET" + path)
+        headers = {
+            "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+            "KALSHI-ACCESS-SIGNATURE": sig,
+            "KALSHI-ACCESS-TIMESTAMP": ts,
+        }
+        r = req.get(full_url, headers=headers, timeout=10)
+        data = r.json()
+        nested_markets = data.get("event", {}).get("markets", [])
+        results["nested_market_count"] = len(nested_markets)
+        results["nested_sample"] = [{"title": m.get("title"), "subtitle": m.get("subtitle"), "ticker": m.get("ticker")} for m in nested_markets[:10]]
+        results["status"] = r.status_code
+        return jsonify(results)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.route("/api/debug/sample_old")
+def debug_sample_old():
     try:
         results = {}
         et = "KXNBAGAME-26APR27MINDEN"
