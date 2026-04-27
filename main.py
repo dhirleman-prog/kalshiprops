@@ -149,15 +149,14 @@ def get_markets():
     try:
         all_markets = []
 
-        # The individual player prop markets live under specific game event tickers
-        # e.g. KXNBAGAME-26APR27MINDEN for Game 5 MIN at DEN on Apr 27
-        # We need to find today's NBA game event tickers by scanning markets
-        # and looking for the kxnbagame pattern in event_ticker
+        # Individual NBA player prop markets live under KXMVENBASINGLEGAME event tickers
+        # First find all open events under this series, then fetch their markets
 
-        # Step 1: Broad paginate to find KXNBAGAME event tickers
         nba_event_tickers = set()
+
+        # Step 1: Scan markets to find KXMVENBASINGLEGAME event tickers
         cursor = None
-        for _ in range(10):
+        for _ in range(15):
             params = {"limit": 200, "status": "open"}
             if cursor:
                 params["cursor"] = cursor
@@ -166,7 +165,7 @@ def get_markets():
                 markets = resp.get("markets", [])
                 for m in markets:
                     et = m.get("event_ticker", "")
-                    if "kxnbagame" in et.lower() or "nba" in et.lower():
+                    if "kxmvenbasinglegame" in et.lower():
                         nba_event_tickers.add(et)
                 cursor = resp.get("cursor")
                 if not cursor or not markets:
@@ -174,30 +173,13 @@ def get_markets():
             except:
                 break
 
-        # Step 2: Fetch all markets for each NBA game event
-        for et in list(nba_event_tickers)[:20]:
+        # Step 2: Fetch all markets for each NBA single game event
+        for et in list(nba_event_tickers):
             try:
                 resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 200})
                 all_markets.extend(resp.get("markets", []))
             except:
                 continue
-
-        # If we found nothing via event tickers, use everything from pagination
-        if not all_markets:
-            cursor = None
-            for _ in range(10):
-                params = {"limit": 200, "status": "open"}
-                if cursor:
-                    params["cursor"] = cursor
-                try:
-                    resp = kalshi_get("/trade-api/v2/markets", params)
-                    markets = resp.get("markets", [])
-                    all_markets.extend(markets)
-                    cursor = resp.get("cursor")
-                    if not cursor or not markets:
-                        break
-                except:
-                    break
 
         result = build_result(all_markets, search)
 
