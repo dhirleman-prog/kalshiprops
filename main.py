@@ -4,6 +4,7 @@ import os
 import base64
 import datetime
 import re
+import unicodedata
 from urllib.parse import urlencode
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -70,19 +71,14 @@ aO7NnY/dGGakunE63QxAYmorUTZg
 def load_private_key():
     key_pem = os.environ.get("KALSHI_PRIVATE_KEY", KALSHI_PRIVATE_KEY_PEM)
     return serialization.load_pem_private_key(
-        key_pem.strip().encode(),
-        password=None,
-        backend=default_backend()
+        key_pem.strip().encode(), password=None, backend=default_backend()
     )
 
 def sign_pss(private_key, text: str) -> str:
     message = text.encode('utf-8')
     signature = private_key.sign(
         message,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.DIGEST_LENGTH
-        ),
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
         hashes.SHA256()
     )
     return base64.b64encode(signature).decode('utf-8')
@@ -92,14 +88,37 @@ def kalshi_headers(method: str, path: str):
     ts = str(int(datetime.datetime.now().timestamp() * 1000))
     path_no_query = path.split('?')[0]
     msg = ts + method.upper() + path_no_query
-    private_key = load_private_key()
-    sig = sign_pss(private_key, msg)
+    sig = sign_pss(load_private_key(), msg)
     return {
         'KALSHI-ACCESS-KEY': key_id,
         'KALSHI-ACCESS-SIGNATURE': sig,
         'KALSHI-ACCESS-TIMESTAMP': ts,
         'Content-Type': 'application/json'
     }
+
+def normalize(s):
+    return unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode().lower()
+
+def is_player_prop(m):
+    title = m.get("title", "")
+    ticker = m.get("event_ticker", m.get("ticker", ""))
+    if re.search(r':\s*\d+\+', title):
+        return True
+    if "nba" in ticker.lower() or "kxnba" in ticker.lower():
+        return True
+    return False
+
+def parse_market(m):
+    title = m.get("title", "")
+    ticker = m.get("event_ticker", m.get("ticker", ""))
+    colon_match = re.match(r'^(.+?):\s*(\d+)\+?\s*$', title.strip())
+    if colon_match:
+        return colon_match.group(1).strip(), int(colon_match.group(2))
+    threshold_match = re.search(r'(\d+)\+', title)
+    if threshold_match:
+        group_key = re.sub(r'\d+\+.*', '', title).strip().strip(':').strip()
+        return group_key, int(threshold_match.group(1))
+    return None, None
 
 @app.route("/")
 def index():
@@ -108,7 +127,7 @@ def index():
 @app.route("/api/kalshi/markets", methods=["POST"])
 def get_markets():
     data = request.json
-    search = data.get("search", "").lower()
+    search = data.get("search", "").lower().strip()
 
     try:
         all_markets = []
@@ -120,15 +139,9 @@ def get_markets():
             params = {"limit": 200, "status": "open"}
             if cursor:
                 params["cursor"] = cursor
+            full_url = f"{KALSHI_BASE}/markets?{urlencode(params)}"
 
-            query = urlencode(params)
-            full_url = f"{KALSHI_BASE}/markets?{query}"
-
-            resp = requests.get(
-                full_url,
-                headers=kalshi_headers("GET", path),
-                timeout=15
-            )
+            resp = requests.get(full_url, headers=kalshi_headers("GET", path), timeout=15)
 
             if resp.status_code == 401:
                 return jsonify({"error": f"Authentication failed (401): {resp.text[:300]}"}), 401
@@ -145,33 +158,23 @@ def get_markets():
             if not cursor or not markets:
                 break
 
-        keywords = ["point", "pts", "score", "lebron", "curry", "durant",
-                    "tatum", "jokic", "embiid", "giannis", "luka",
-                    "nba", "assists", "rebounds", "three", "basket"]
-
+        # Filter markets
         if search:
-            filtered = [m for m in all_markets if search in (
-                m.get("title","") + m.get("subtitle","") + m.get("event_ticker","")
-            ).lower()]
+            filtered = [m for m in all_markets if
+                search in normalize(m.get("title","") + m.get("subtitle","") + m.get("event_ticker",""))
+                or search in (m.get("title","") + m.get("subtitle","") + m.get("event_ticker","")).lower()
+            ]
         else:
-            filtered = [m for m in all_markets if any(
-                k in (m.get("title","") + m.get("subtitle","") + m.get("event_ticker","")).lower()
-                for k in keywords
-            )]
+            filtered = [m for m in all_markets if is_player_prop(m)]
 
+        # Group by player
         grouped = {}
         for m in filtered:
-            title = m.get("title", "")
-            ticker = m.get("event_ticker", m.get("ticker", ""))
-
-            threshold_match = re.search(r"(\d+)\+?\s*(?:pts?|points?|assists?|rebounds?)", title, re.IGNORECASE)
-            if not threshold_match:
+            group_key, threshold = parse_market(m)
+            if not group_key or threshold is None:
                 continue
 
-            threshold = int(threshold_match.group(1))
-            group_key = re.sub(r"\d+\+?\s*(?:pts?|points?|assists?|rebounds?)", "", title, flags=re.IGNORECASE).strip()
-            group_key = re.sub(r"\s+", " ", group_key).strip(" -–")
-
+            ticker = m.get("event_ticker", m.get("ticker", ""))
             if group_key not in grouped:
                 grouped[group_key] = {"name": group_key, "event_ticker": ticker, "props": []}
 
@@ -179,6 +182,7 @@ def get_markets():
             yes_ask = m.get("yes_ask", 0)
             last_price = m.get("last_price", 0)
 
+            # Handle fixed-point dollar format
             if isinstance(yes_bid, str):
                 yes_bid = int(float(yes_bid) * 100)
             if isinstance(yes_ask, str):
@@ -207,11 +211,7 @@ def get_markets():
 
         result.sort(key=lambda x: sum(p["volume"] for p in x["props"]), reverse=True)
 
-        return jsonify({
-            "players": result,
-            "total_markets": len(all_markets),
-            "matched": len(filtered)
-        })
+        return jsonify({"players": result, "total_markets": len(all_markets), "matched": len(filtered)})
 
     except requests.exceptions.Timeout:
         return jsonify({"error": "Request timed out — try again"}), 504
