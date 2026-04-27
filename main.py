@@ -148,28 +148,25 @@ def get_markets():
 
     try:
         all_markets = []
-        nba_event_tickers = []
 
-        # Step 1: Find open NBA events
-        for series in ["KXNBAGAME", "KXNBA"]:
+        # Fetch NBA markets directly using series_ticker on markets endpoint
+        for series in ["KXNBAGAME", "KXNBA", "KXNBAPLAYER"]:
             try:
-                resp = kalshi_get("/trade-api/v2/events", {"series_ticker": series, "status": "open", "limit": 50})
-                for event in resp.get("events", []):
-                    et = event.get("event_ticker", "")
-                    if et:
-                        nba_event_tickers.append(et)
+                cursor = None
+                for _ in range(5):
+                    params = {"series_ticker": series, "status": "open", "limit": 200}
+                    if cursor:
+                        params["cursor"] = cursor
+                    resp = kalshi_get("/trade-api/v2/markets", params)
+                    markets = resp.get("markets", [])
+                    all_markets.extend(markets)
+                    cursor = resp.get("cursor")
+                    if not cursor or not markets:
+                        break
             except:
                 continue
 
-        # Step 2: Fetch markets per event
-        for event_ticker in nba_event_tickers[:15]:
-            try:
-                resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": event_ticker, "status": "open", "limit": 200})
-                all_markets.extend(resp.get("markets", []))
-            except:
-                continue
-
-        # Step 3: Fallback — paginate broadly
+        # Fallback — broad pagination if series approach found nothing
         if not all_markets:
             cursor = None
             for _ in range(20):
@@ -203,10 +200,15 @@ def get_markets():
 def debug_events():
     try:
         out = {}
-        for series in ["KXNBAGAME", "KXNBA", "NBA", "KXSPORTS"]:
+        for series in ["KXNBAGAME", "KXNBA", "KXNBAPLAYER", "KXSPORTS", "KXNBA26"]:
             try:
-                resp = kalshi_get("/trade-api/v2/events", {"series_ticker": series, "status": "open", "limit": 10})
-                out[series] = [e.get("event_ticker") for e in resp.get("events", [])]
+                resp = kalshi_get("/trade-api/v2/markets", {"series_ticker": series, "status": "open", "limit": 5})
+                markets = resp.get("markets", [])
+                out[series] = {
+                    "count": len(markets),
+                    "sample_titles": [m.get("title") for m in markets[:3]],
+                    "sample_tickers": [m.get("ticker") for m in markets[:3]]
+                }
             except Exception as ex:
                 out[series] = f"error: {str(ex)}"
         return jsonify(out)
