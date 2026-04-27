@@ -99,25 +99,26 @@ def kalshi_headers(method: str, path: str):
 def normalize(s):
     return unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode().lower()
 
-def is_player_prop(m):
-    title = m.get("title", "")
-    ticker = m.get("event_ticker", m.get("ticker", ""))
-    if re.search(r':\s*\d+\+', title):
-        return True
-    if "nba" in ticker.lower() or "kxnba" in ticker.lower():
-        return True
-    return False
+# Keywords that indicate a non-points prop
+NON_POINTS = ["assist", "rebound", "three", "3pt", "3-pt", "block", "steal",
+              "turnover", "fg", "ft", "minute", "first basket", "double",
+              "triple", "quarter", "half", "win", "spread", "total"]
+
+def is_points_prop(m):
+    title = m.get("title", "").strip()
+    # Must be clean "Name: N+" format — no extra words
+    if not re.match(r'^.+:\s*\d+\+\s*$', title):
+        return False
+    title_lower = title.lower()
+    if any(w in title_lower for w in NON_POINTS):
+        return False
+    return True
 
 def parse_market(m):
-    title = m.get("title", "")
-    ticker = m.get("event_ticker", m.get("ticker", ""))
-    colon_match = re.match(r'^(.+?):\s*(\d+)\+?\s*$', title.strip())
+    title = m.get("title", "").strip()
+    colon_match = re.match(r'^(.+?):\s*(\d+)\+?\s*$', title)
     if colon_match:
         return colon_match.group(1).strip(), int(colon_match.group(2))
-    threshold_match = re.search(r'(\d+)\+', title)
-    if threshold_match:
-        group_key = re.sub(r'\d+\+.*', '', title).strip().strip(':').strip()
-        return group_key, int(threshold_match.group(1))
     return None, None
 
 @app.route("/")
@@ -158,20 +159,26 @@ def get_markets():
             if not cursor or not markets:
                 break
 
-        # Filter markets
+        # First pass: only keep points props
+        points_markets = [m for m in all_markets if is_points_prop(m)]
+
+        # Second pass: apply search filter if provided
         if search:
-            filtered = [m for m in all_markets if
-                search in normalize(m.get("title","") + m.get("subtitle","") + m.get("event_ticker",""))
-                or search in (m.get("title","") + m.get("subtitle","") + m.get("event_ticker","")).lower()
+            filtered = [m for m in points_markets if
+                search in normalize(m.get("title", ""))
+                or search in m.get("title", "").lower()
             ]
         else:
-            filtered = [m for m in all_markets if is_player_prop(m)]
+            filtered = points_markets
 
-        # Group by player
+        # Group by player name
         grouped = {}
         for m in filtered:
             group_key, threshold = parse_market(m)
             if not group_key or threshold is None:
+                continue
+            # Skip weird thresholds (e.g. 0, 1, 2 are not real scoring props)
+            if threshold < 5 or threshold > 75:
                 continue
 
             ticker = m.get("event_ticker", m.get("ticker", ""))
@@ -182,7 +189,6 @@ def get_markets():
             yes_ask = m.get("yes_ask", 0)
             last_price = m.get("last_price", 0)
 
-            # Handle fixed-point dollar format
             if isinstance(yes_bid, str):
                 yes_bid = int(float(yes_bid) * 100)
             if isinstance(yes_ask, str):
@@ -205,7 +211,13 @@ def get_markets():
 
         result = []
         for group in grouped.values():
-            group["props"].sort(key=lambda x: x["threshold"])
+            # Deduplicate thresholds (keep highest volume for each)
+            seen = {}
+            for prop in group["props"]:
+                t = prop["threshold"]
+                if t not in seen or prop["volume"] > seen[t]["volume"]:
+                    seen[t] = prop
+            group["props"] = sorted(seen.values(), key=lambda x: x["threshold"])
             if len(group["props"]) >= 2:
                 result.append(group)
 
