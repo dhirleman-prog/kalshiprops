@@ -73,13 +73,12 @@ NON_POINTS = ["assist", "rebound", "three", "3pt", "3-pt", "block", "steal",
 def parse_player_points(m):
     title = m.get("title", "").strip()
     subtitle = m.get("subtitle", "").strip()
-    combined = (title + " " + subtitle).lower()
-    if any(w in combined for w in NON_POINTS):
-        return None, None
-    for text in [subtitle, title]:
+
+    for text in [title, subtitle]:
         if not text:
             continue
-        match = re.match(r"^([A-ZÀ-Ö][a-zA-ZÀ-öÙ-ý'\-\. ]+):\s*(\d+)\+\s*$", text.strip())
+        # Match "Jamal Murray: 30+ points" OR "Jamal Murray: 30+"
+        match = re.match(r"^([A-ZÀ-Ö][a-zA-ZÀ-öÙ-ý'\-\. ]+):\s*(\d+)\+\s*(?:points?)?\s*$", text.strip(), re.IGNORECASE)
         if match:
             candidate = match.group(1).strip()
             words = candidate.split()
@@ -149,53 +148,23 @@ def get_markets():
     try:
         all_markets = []
 
-        # NBA player props are embedded inside KXNBAGAME events
-        # Strategy: fetch today's KXNBAGAME events with nested markets
-
-        import datetime as dt
-        today = dt.datetime.utcnow()
-        tomorrow = today + dt.timedelta(days=1)
-
-        # Build candidate event tickers for today and tomorrow
-        # Format: KXNBAGAME-26APR27MINDEN
-        # We don't know the city codes, so fetch via events endpoint with with_nested_markets
-        nba_event_tickers = set()
-
-        # Fetch events with nested markets directly
-        try:
-            path = "/trade-api/v2/events"
-            params = {"series_ticker": "KXNBAGAME", "status": "open", "limit": 100, "with_nested_markets": "true"}
-            query = urlencode(params)
-            full_url = f"https://api.elections.kalshi.com{path}?{query}"
-            import requests as req
-            ts = str(int(datetime.datetime.now().timestamp() * 1000))
-            sig = sign_pss(ts + "GET" + path)
-            headers = {
-                "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
-                "KALSHI-ACCESS-SIGNATURE": sig,
-                "KALSHI-ACCESS-TIMESTAMP": ts,
-                "Content-Type": "application/json"
-            }
-            r = req.get(full_url, headers=headers, timeout=20)
-            if r.ok:
-                data = r.json()
-                for event in data.get("events", []):
-                    et = event.get("event_ticker", "")
-                    if et:
-                        nba_event_tickers.add(et)
-                    # Extract nested markets directly
-                    for m in event.get("markets", []):
-                        all_markets.append(m)
-        except:
-            pass
-
-        # Also try fetching markets for each found event ticker
-        for et in list(nba_event_tickers):
+        # NBA player points props are under series KXNBAPTS
+        # Format: "Jamal Murray: 30+ points"
+        # Fetch all open markets in this series (paginate up to 1000)
+        cursor = None
+        for _ in range(5):
+            params = {"series_ticker": "KXNBAPTS", "status": "open", "limit": 200}
+            if cursor:
+                params["cursor"] = cursor
             try:
-                resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 200})
-                all_markets.extend(resp.get("markets", []))
+                resp = kalshi_get("/trade-api/v2/markets", params)
+                markets = resp.get("markets", [])
+                all_markets.extend(markets)
+                cursor = resp.get("cursor")
+                if not cursor or not markets:
+                    break
             except:
-                continue
+                break
 
         result = build_result(all_markets, search)
 
