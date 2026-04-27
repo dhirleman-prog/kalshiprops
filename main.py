@@ -216,30 +216,16 @@ def debug_events():
 @app.route("/api/debug/sample")
 def debug_sample():
     try:
-        # Scan first 2000 markets for NBA event tickers
-        nba_tickers = set()
-        sample_titles = []
-        cursor = None
-        for _ in range(10):
-            params = {"limit": 200, "status": "open"}
-            if cursor:
-                params["cursor"] = cursor
-            resp = kalshi_get("/trade-api/v2/markets", params)
-            markets = resp.get("markets", [])
-            for m in markets:
-                et = m.get("event_ticker", "")
-                title = m.get("title", "")
-                if "kxnbagame" in et.lower() or "nba" in et.lower():
-                    nba_tickers.add(et)
-                if len(sample_titles) < 5:
-                    sample_titles.append({"title": title, "event_ticker": et})
-            cursor = resp.get("cursor")
-            if not cursor or not markets:
-                break
+        # Fetch markets directly from the known NBA single game event
+        et = "KXMVENBASINGLEGAME-S20257578DB0327A"
+        resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 100})
+        markets = resp.get("markets", [])
         return jsonify({
-            "nba_event_tickers": list(nba_tickers),
-            "sample_titles": sample_titles,
-            "total_scanned": _*200
+            "event_ticker": et,
+            "count": len(markets),
+            "markets": [{"title": m.get("title"), "subtitle": m.get("subtitle"),
+                         "ticker": m.get("ticker"), "yes_bid": m.get("yes_bid"),
+                         "yes_ask": m.get("yes_ask")} for m in markets[:20]]
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
