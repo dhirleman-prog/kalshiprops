@@ -216,19 +216,57 @@ def debug_events():
 @app.route("/api/debug/sample")
 def debug_sample():
     try:
-        # Fetch markets directly from the known NBA single game event
-        et = "KXMVENBASINGLEGAME-S20257578DB0327A"
-        resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "status": "open", "limit": 100})
-        markets = resp.get("markets", [])
-        return jsonify({
-            "event_ticker": et,
-            "count": len(markets),
-            "markets": [{"title": m.get("title"), "subtitle": m.get("subtitle"),
-                         "ticker": m.get("ticker"), "yes_bid": m.get("yes_bid"),
-                         "yes_ask": m.get("yes_ask")} for m in markets[:20]]
-        })
+        results = {}
+        et = "KXNBAGAME-26APR27MINDEN"
+
+        # Try markets endpoint with event_ticker
+        try:
+            resp = kalshi_get("/trade-api/v2/markets", {"event_ticker": et, "limit": 10})
+            results["markets_with_event_ticker"] = {
+                "count": len(resp.get("markets", [])),
+                "sample": [{"title": m.get("title"), "subtitle": m.get("subtitle"), "ticker": m.get("ticker")} for m in resp.get("markets", [])[:5]]
+            }
+        except Exception as ex:
+            results["markets_with_event_ticker"] = str(ex)
+
+        # Try event endpoint directly — note: path must match exactly
+        try:
+            full_url = f"https://api.elections.kalshi.com/trade-api/v2/events/{et}"
+            import requests as req
+            path = f"/trade-api/v2/events/{et}"
+            ts = str(int(datetime.datetime.now().timestamp() * 1000))
+            sig = sign_pss(ts + "GET" + path)
+            headers = {
+                "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+                "KALSHI-ACCESS-SIGNATURE": sig,
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+                "Content-Type": "application/json"
+            }
+            r = req.get(full_url, headers=headers, timeout=10)
+            results["event_direct"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as ex:
+            results["event_direct"] = str(ex)
+
+        # Try series endpoint
+        try:
+            full_url = "https://api.elections.kalshi.com/trade-api/v2/series/KXNBAGAME"
+            path = "/trade-api/v2/series/KXNBAGAME"
+            ts = str(int(datetime.datetime.now().timestamp() * 1000))
+            sig = sign_pss(ts + "GET" + path)
+            headers = {
+                "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+                "KALSHI-ACCESS-SIGNATURE": sig,
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+            }
+            r = req.get(full_url, headers=headers, timeout=10)
+            results["series_kxnbagame"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as ex:
+            results["series_kxnbagame"] = str(ex)
+
+        return jsonify(results)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
