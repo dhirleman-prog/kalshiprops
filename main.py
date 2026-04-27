@@ -11,7 +11,7 @@ from cryptography.hazmat.backends import default_backend
 
 app = Flask(__name__)
 
-KALSHI_BASE = "https://trading-api.kalshi.com/trade-api/v2"
+KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 KALSHI_KEY_ID = "9b4644d1-e5ca-4546-930f-c7593c082612"
 
 KALSHI_PRIVATE_KEY_PEM = """-----BEGIN PRIVATE KEY-----
