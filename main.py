@@ -4,11 +4,11 @@ import os
 
 app = Flask(__name__)
 
-KALSHI_BASE = "https://api.kalshi.com/trade-api/v2"
+KALSHI_BASE = "https://trading-api.kalshi.com/trade-api/v2"
 
 def kalshi_headers(api_key):
     return {
-        "Authorization": f"Token {api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
