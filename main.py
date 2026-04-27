@@ -99,31 +99,59 @@ def kalshi_headers(method: str, path: str):
 def normalize(s):
     return unicodedata.normalize('NFD', s).encode('ascii', 'ignore').decode().lower()
 
-# Keywords that indicate a non-points prop
-NON_POINTS = ["assist", "rebound", "three", "3pt", "3-pt", "block", "steal",
-              "turnover", "fg", "ft", "minute", "first basket", "double",
-              "triple", "quarter", "half", "win", "spread", "total"]
-
-def is_points_prop(m):
-    title = m.get("title", "").strip()
-    # Must be clean "Name: N+" format — no extra words
-    if not re.match(r'^.+:\s*\d+\+\s*$', title):
-        return False
-    title_lower = title.lower()
-    if any(w in title_lower for w in NON_POINTS):
-        return False
-    return True
-
-def parse_market(m):
-    title = m.get("title", "").strip()
-    colon_match = re.match(r'^(.+?):\s*(\d+)\+?\s*$', title)
-    if colon_match:
-        return colon_match.group(1).strip(), int(colon_match.group(2))
-    return None, None
+def fetch_all_markets():
+    all_markets = []
+    cursor = None
+    pages = 0
+    while pages < 5:
+        path = "/trade-api/v2/markets"
+        params = {"limit": 200, "status": "open"}
+        if cursor:
+            params["cursor"] = cursor
+        full_url = f"{KALSHI_BASE}/markets?{urlencode(params)}"
+        resp = requests.get(full_url, headers=kalshi_headers("GET", path), timeout=15)
+        if not resp.ok:
+            raise Exception(f"Kalshi error {resp.status_code}: {resp.text[:300]}")
+        resp_data = resp.json()
+        markets = resp_data.get("markets", [])
+        all_markets.extend(markets)
+        cursor = resp_data.get("cursor")
+        pages += 1
+        if not cursor or not markets:
+            break
+    return all_markets
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+# Debug endpoint — shows raw market titles so we can see exact format
+@app.route("/api/kalshi/debug", methods=["POST"])
+def debug_markets():
+    data = request.json
+    search = data.get("search", "jamal").lower()
+    try:
+        all_markets = fetch_all_markets()
+        matches = []
+        for m in all_markets:
+            title = m.get("title", "")
+            subtitle = m.get("subtitle", "")
+            ticker = m.get("ticker", "")
+            event_ticker = m.get("event_ticker", "")
+            if search in normalize(title + subtitle + ticker + event_ticker):
+                matches.append({
+                    "title": title,
+                    "subtitle": subtitle,
+                    "ticker": ticker,
+                    "event_ticker": event_ticker,
+                    "yes_bid": m.get("yes_bid"),
+                    "yes_ask": m.get("yes_ask"),
+                    "last_price": m.get("last_price"),
+                })
+        return jsonify({"count": len(matches), "markets": matches[:30]})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route("/api/kalshi/markets", methods=["POST"])
 def get_markets():
@@ -131,87 +159,86 @@ def get_markets():
     search = data.get("search", "").lower().strip()
 
     try:
-        all_markets = []
-        cursor = None
-        pages = 0
+        all_markets = fetch_all_markets()
 
-        while pages < 5:
-            path = "/trade-api/v2/markets"
-            params = {"limit": 200, "status": "open"}
-            if cursor:
-                params["cursor"] = cursor
-            full_url = f"{KALSHI_BASE}/markets?{urlencode(params)}"
-
-            resp = requests.get(full_url, headers=kalshi_headers("GET", path), timeout=15)
-
-            if resp.status_code == 401:
-                return jsonify({"error": f"Authentication failed (401): {resp.text[:300]}"}), 401
-            if resp.status_code == 403:
-                return jsonify({"error": f"Access forbidden (403): {resp.text[:300]}"}), 403
-            if not resp.ok:
-                return jsonify({"error": f"Kalshi API error {resp.status_code}: {resp.text[:300]}"}), resp.status_code
-
-            resp_data = resp.json()
-            markets = resp_data.get("markets", [])
-            all_markets.extend(markets)
-            cursor = resp_data.get("cursor")
-            pages += 1
-            if not cursor or not markets:
-                break
-
-        # First pass: only keep points props
-        points_markets = [m for m in all_markets if is_points_prop(m)]
-
-        # Second pass: apply search filter if provided
+        # Search filter with normalization for accented chars
         if search:
-            filtered = [m for m in points_markets if
-                search in normalize(m.get("title", ""))
-                or search in m.get("title", "").lower()
+            filtered = [m for m in all_markets if
+                search in normalize(m.get("title","") + m.get("subtitle","") + m.get("event_ticker",""))
+                or search in (m.get("title","") + m.get("subtitle","") + m.get("event_ticker","")).lower()
             ]
         else:
-            filtered = points_markets
+            # Default: show all markets that look like player props
+            filtered = [m for m in all_markets if re.search(r':\s*\d+\+', m.get("title",""))]
 
-        # Group by player name
+        # Group by player — try multiple title formats
         grouped = {}
+        NON_POINTS = ["assist", "rebound", "three", "3pt", "3-pt", "block",
+                      "steal", "turnover", "fg", "ft", "minute", "double",
+                      "triple", "quarter", "half", "spread", "moneyline"]
+
         for m in filtered:
-            group_key, threshold = parse_market(m)
-            if not group_key or threshold is None:
+            title = m.get("title", "").strip()
+            subtitle = m.get("subtitle", "").strip()
+
+            # Skip non-points props
+            combined = (title + subtitle).lower()
+            if any(w in combined for w in NON_POINTS):
                 continue
-            # Skip weird thresholds (e.g. 0, 1, 2 are not real scoring props)
+
+            # Try to extract player name and threshold from title
+            # Format 1: "Jamal Murray: 25+" 
+            # Format 2: "yes Jamal Murray: 3+,yes Tobias..." (parlay/combo — skip)
+            # Format 3: "Timberwolves at Nuggets: Points" with subtitle "Jamal Murray: 25+"
+
+            player_name = None
+            threshold = None
+
+            # Check subtitle first (often cleaner)
+            for text in [subtitle, title]:
+                m2 = re.match(r'^([A-Z][a-zA-Zéèêëàâäîïôùûüç\'\-\. ]+):\s*(\d+)\+\s*$', text.strip())
+                if m2:
+                    candidate = m2.group(1).strip()
+                    # Make sure it looks like a person name (2+ words, not too long)
+                    words = candidate.split()
+                    if 2 <= len(words) <= 4 and len(candidate) < 40:
+                        player_name = candidate
+                        threshold = int(m2.group(2))
+                        break
+
+            if not player_name or threshold is None:
+                continue
             if threshold < 5 or threshold > 75:
                 continue
 
             ticker = m.get("event_ticker", m.get("ticker", ""))
-            if group_key not in grouped:
-                grouped[group_key] = {"name": group_key, "event_ticker": ticker, "props": []}
+            if player_name not in grouped:
+                grouped[player_name] = {"name": player_name, "event_ticker": ticker, "props": []}
 
-            yes_bid = m.get("yes_bid", 0)
-            yes_ask = m.get("yes_ask", 0)
-            last_price = m.get("last_price", 0)
+            yes_bid = m.get("yes_bid", 0) or 0
+            yes_ask = m.get("yes_ask", 0) or 0
+            last_price = m.get("last_price", 0) or 0
 
-            if isinstance(yes_bid, str):
-                yes_bid = int(float(yes_bid) * 100)
-            if isinstance(yes_ask, str):
-                yes_ask = int(float(yes_ask) * 100)
-            if isinstance(last_price, str):
-                last_price = int(float(last_price) * 100)
+            if isinstance(yes_bid, str): yes_bid = int(float(yes_bid) * 100)
+            if isinstance(yes_ask, str): yes_ask = int(float(yes_ask) * 100)
+            if isinstance(last_price, str): last_price = int(float(last_price) * 100)
 
             if yes_bid == 0 and yes_ask == 0 and last_price > 0:
                 yes_bid = max(1, last_price - 3)
                 yes_ask = min(99, last_price + 3)
 
-            grouped[group_key]["props"].append({
+            grouped[player_name]["props"].append({
                 "threshold": threshold,
                 "bid": yes_bid,
                 "ask": yes_ask,
                 "mid": (yes_bid + yes_ask) / 2 if yes_bid and yes_ask else last_price,
-                "volume": m.get("volume", 0),
+                "volume": m.get("volume", 0) or 0,
                 "ticker": m.get("ticker", "")
             })
 
         result = []
         for group in grouped.values():
-            # Deduplicate thresholds (keep highest volume for each)
+            # Deduplicate thresholds
             seen = {}
             for prop in group["props"]:
                 t = prop["threshold"]
@@ -225,10 +252,6 @@ def get_markets():
 
         return jsonify({"players": result, "total_markets": len(all_markets), "matched": len(filtered)})
 
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "Request timed out — try again"}), 504
-    except requests.exceptions.ConnectionError:
-        return jsonify({"error": "Could not connect to Kalshi API"}), 503
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
