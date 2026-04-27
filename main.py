@@ -232,25 +232,52 @@ def debug_events():
 @app.route("/api/debug/sample")
 def debug_sample():
     try:
-        results = {}
-        et = "KXNBAGAME-26APR27MINDEN"
-        # Fetch event with nested markets
-        path = f"/trade-api/v2/events/{et}"
-        full_url = f"https://api.elections.kalshi.com{path}?with_nested_markets=true"
         import requests as req
-        ts = str(int(datetime.datetime.now().timestamp() * 1000))
-        sig = sign_pss(ts + "GET" + path)
-        headers = {
-            "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
-            "KALSHI-ACCESS-SIGNATURE": sig,
-            "KALSHI-ACCESS-TIMESTAMP": ts,
-        }
-        r = req.get(full_url, headers=headers, timeout=10)
-        data = r.json()
-        nested_markets = data.get("event", {}).get("markets", [])
-        results["nested_market_count"] = len(nested_markets)
-        results["nested_sample"] = [{"title": m.get("title"), "subtitle": m.get("subtitle"), "ticker": m.get("ticker")} for m in nested_markets[:10]]
-        results["status"] = r.status_code
+
+        def signed_get(path, params=None):
+            query = urlencode(params) if params else ""
+            full_url = f"https://api.elections.kalshi.com{path}{'?' + query if query else ''}"
+            ts = str(int(datetime.datetime.now().timestamp() * 1000))
+            sig = sign_pss(ts + "GET" + path)
+            headers = {
+                "KALSHI-ACCESS-KEY": KALSHI_KEY_ID,
+                "KALSHI-ACCESS-SIGNATURE": sig,
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+            }
+            r = req.get(full_url, headers=headers, timeout=10)
+            return r.status_code, r.json() if r.ok else r.text[:300]
+
+        results = {}
+
+        # Try every plausible NBA player prop series ticker
+        for series in ["KXNBAPLAYERPTS", "KXNBAPLAYER", "KXNBAPTS",
+                       "KXNBAPROP", "KXNBAPROPS", "KXNBAPOINTS",
+                       "KXNBAPLAYERPOINTS", "KXNBAGAMEPLAYER",
+                       "KXNBAPLAYERPROP", "KXNBAPLAYERPROPS"]:
+            status, data = signed_get("/trade-api/v2/markets",
+                                      {"series_ticker": series, "status": "open", "limit": 3})
+            if status == 200 and isinstance(data, dict):
+                markets = data.get("markets", [])
+                if markets:
+                    results[series] = {
+                        "count": len(markets),
+                        "sample": [m.get("title") for m in markets[:2]]
+                    }
+                else:
+                    results[series] = "found but empty"
+            else:
+                results[series] = f"{status}"
+
+        # Also scan series list endpoint
+        status, data = signed_get("/trade-api/v2/series", {"category": "Sports", "limit": 100})
+        if status == 200 and isinstance(data, dict):
+            series_list = data.get("series", [])
+            nba_series = [s.get("ticker") for s in series_list
+                         if "nba" in (s.get("ticker","") + s.get("title","")).lower()]
+            results["nba_series_from_list"] = nba_series
+        else:
+            results["series_list"] = f"{status}: {data}"
+
         return jsonify(results)
     except Exception as e:
         import traceback
