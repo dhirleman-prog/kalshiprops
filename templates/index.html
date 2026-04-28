@@ -568,8 +568,8 @@ function runModel() {
   modelProb = Math.min(1,Math.max(0,modelProb));
 
   let mean=0, variance=0;
-  for(let k=0;k<=MAX;k++) mean+=k*combined[k];
-  for(let k=0;k<=MAX;k++) variance+=Math.pow(k-mean,2)*combined[k];
+  for(let k=0;k<combined.length;k++) mean+=k*(combined[k]||0);
+  for(let k=0;k<combined.length;k++) variance+=Math.pow(k-mean,2)*(combined[k]||0);
 
   const bookFields = [
     {id:'oddsKings', name:'DraftKings'},
