@@ -678,6 +678,18 @@ function loadToSlot(player, slotIdx) {
   document.querySelectorAll('.player-item').forEach(el => el.classList.remove('selected'));
 }
 
+function loadFromCache(playerIdx, slotIdx) {
+  if(!window._playerCache || !window._playerCache[playerIdx]) return;
+  const player = JSON.parse(JSON.stringify(window._playerCache[playerIdx]));
+  slots[slotIdx] = player;
+  renderSlots();
+  runModel();
+  document.querySelectorAll('.player-item').forEach(el => el.classList.remove('selected'));
+  document.getElementById('pi-'+playerIdx)?.classList.add('selected');
+  // Switch to model tab
+  switchTab('model', document.querySelectorAll('.tab')[0]);
+}
+
 async function fetchProps() {
   const key = document.getElementById('apiKey').value.trim();
   const search = document.getElementById('searchInput').value.trim();
@@ -707,31 +719,23 @@ async function fetchProps() {
       return;
     }
 
+    // Store players in a cache keyed by index to avoid serialization issues
+    window._playerCache = data.players;
+
     content.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">${data.players.length} players found — click to load into a slot</div>
     <div class="player-list scrollable">
-      ${data.players.map(p=>`
-        <div class="player-item" id="pi-${p.event_ticker}">
+      ${data.players.map((p,idx)=>`
+        <div class="player-item" id="pi-${idx}">
           <div>
             <div class="player-item-name">${p.name}</div>
             <div class="player-item-meta">${p.props.length} thresholds: ${p.props.map(x=>x.threshold+'+').join(', ')}</div>
             <div class="player-item-action">
-              ${slots.map((s,i)=>`<button class="btn-sm" onclick="loadToSlot(${JSON.stringify(JSON.stringify(p))},${i})" style="--c:${SLOT_COLORS[i]}">→ Slot ${i+1}</button>`).join('')}
+              ${slots.map((s,i)=>`<button class="btn-sm" onclick="loadFromCache(${idx},${i})">→ Slot ${i+1}</button>`).join('')}
             </div>
           </div>
         </div>
       `).join('')}
     </div>`;
-
-    document.querySelectorAll('.btn-sm[onclick*="loadToSlot"]').forEach(btn=>{
-      btn.addEventListener('click',function(e){
-        const raw = this.getAttribute('onclick').match(/loadToSlot\((.*?),(\d)\)/);
-        if(raw) {
-          const player = JSON.parse(JSON.parse(raw[1]));
-          const slotIdx = parseInt(raw[2]);
-          loadToSlot(player, slotIdx);
-        }
-      });
-    });
 
   } catch(e) {
     statusEl.textContent = 'Error: ' + e.message;
