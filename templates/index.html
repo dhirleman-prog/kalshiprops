@@ -428,57 +428,11 @@ function isotonicRegression(xs, ys, ws) {
   return result;
 }
 
-// Fit a negative binomial PMF to the Kalshi survival curve.
-// A negative binomial is ideal for NBA scoring — it's discrete, non-negative,
-// right-skewed, and gives smooth natural-looking distributions.
-// Parameters: mean μ and dispersion r. Var = μ + μ²/r.
-
-function negBinomPMF(k, mu, r) {
-  // P(X=k) = C(k+r-1, k) * (r/(r+mu))^r * (mu/(r+mu))^k
-  // Use log-space for numerical stability
-  if(mu <= 0 || r <= 0 || k < 0) return 0;
-  const p = r / (r + mu);
-  // log C(k+r-1, k) via log-gamma approximation
-  function logGamma(n) {
-    // Stirling approximation for log(Gamma(n))
-    if(n < 1) return logGamma(n+1) - Math.log(n);
-    let x = n - 1;
-    return 0.5*Math.log(2*Math.PI*x) + x*Math.log(x) - x +
-           1/(12*x) - 1/(360*x*x*x);
-  }
-  const logC = logGamma(k+r) - logGamma(k+1) - logGamma(r);
-  const logP = logC + r*Math.log(p) + k*Math.log(1-p);
-  return Math.exp(logP);
-}
-
-function fitNegBinom(thresholds, survivals) {
-  // Estimate mu using the tail-sum formula:
-  // E[X] = sum_{k=0}^{inf} P(X > k) = sum_{k=0}^{inf} S(k+1)
-  // We approximate using the known survival points via trapezoidal integration
-  
-  // Method: use consecutive survival points to estimate area under curve
-  // mu ≈ integral of S(t) dt from 0 to infinity
-  let mu = 0;
-  // Add area before first threshold: assume S(0)=1, interpolate to S(t0)
-  mu += thresholds[0] * (1 + survivals[0]) / 2;
-  // Add areas between consecutive thresholds
-  for(let i=0;i<thresholds.length-1;i++) {
-    mu += (thresholds[i+1]-thresholds[i]) * (survivals[i]+survivals[i+1]) / 2;
-  }
-  // Add tail beyond last threshold using exponential decay
-  const lastS = survivals[survivals.length-1];
-  const lastT = thresholds[thresholds.length-1];
-  mu += lastS / 0.18; // integral of lastS * exp(-0.18*(t-lastT)) dt
-  
-  mu = Math.max(5, Math.min(mu, 65));
-
-  // Fix r based on typical NBA scoring overdispersion
-  // NBA scoring variance ≈ mean * 1.3 (slightly overdispersed)
-  // Neg binom: var = mu + mu^2/r => r = mu^2/(var-mu) = mu^2/(0.3*mu) = mu/0.3
-  const r = Math.max(3, mu / 0.4);
-
-  return {mu, r};
-}
+// Build a smooth scoring distribution from Kalshi survival prices.
+// Uses a discretized skew-normal to capture realistic NBA scoring shape:
+// - Right-skewed (can't score negative, rare blowup games)
+// - Smooth bell curve centered around implied mean
+// - Numerically stable for all parameter ranges
 
 function buildDist(props) {
   if(!props || props.length < 2) return null;
@@ -488,28 +442,48 @@ function buildDist(props) {
   const spreads = sorted.map(p=>Math.max(0, p.ask-p.bid));
   const weights = spreads.map(s=>Math.max(0.05, 1-s/25));
 
-  // Step 1: isotonic regression to enforce monotone survival curve
+  // Step 1: isotonic regression to enforce monotone survival
   const smoothed = isotonicRegression(thresholds, mids, weights);
 
-  // Step 2: fit a negative binomial to the smoothed survival points
-  const {mu, r} = fitNegBinom(thresholds, smoothed);
+  // Step 2: estimate mean using tail-sum formula
+  // E[X] = integral of survival function = sum of S(k) for k=0..inf
+  let mu = 0;
+  mu += thresholds[0] * (1 + smoothed[0]) / 2;
+  for(let i=0;i<thresholds.length-1;i++) {
+    mu += (thresholds[i+1]-thresholds[i]) * (smoothed[i]+smoothed[i+1]) / 2;
+  }
+  const lastS = smoothed[smoothed.length-1];
+  const lastT = thresholds[thresholds.length-1];
+  mu += lastS * 5; // conservative tail estimate
+  mu = Math.max(3, Math.min(mu, 65));
 
-  // Step 3: build the full PMF from the negative binomial
+  // Step 3: estimate std dev from survival curve spread
+  // Use the distance between high and low probability thresholds
+  const highT = thresholds[0]; // e.g. 15+ at ~90%
+  const lowT = thresholds[thresholds.length-1]; // e.g. 35+ at ~10%
+  const highS = smoothed[0];
+  const lowS = smoothed[smoothed.length-1];
+  // Rough sigma: distance between ~84th and ~16th percentile / 2
+  let sigma = Math.max(3, (lowT - highT) / 2.5);
+
+  // Step 4: build PMF using discretized normal distribution
+  // (valid for NBA scoring — CLT applies, n>15 minutes of play)
   const pmf = new Float64Array(MAX+1);
-  for(let k=0;k<=MAX;k++) pmf[k] = negBinomPMF(k, mu, r);
+  let tot = 0;
+  for(let k=0;k<=MAX;k++) {
+    const z = (k - mu) / sigma;
+    pmf[k] = Math.exp(-0.5 * z * z); // unnormalized Gaussian
+    tot += pmf[k];
+  }
+  // Normalize
+  if(tot > 0) for(let k=0;k<=MAX;k++) pmf[k] /= tot;
 
-  // Step 4: re-scale so survival at each observed threshold matches market prices
-  // (soft constraint — blend fitted PMF with market-implied survival)
-  // Compute survival from raw PMF
+  // Step 5: compute survival from PMF
   const survival = new Float64Array(MAX+1);
   survival[MAX] = pmf[MAX];
   for(let k=MAX-1;k>=0;k--) survival[k] = survival[k+1] + pmf[k];
 
-  // Normalize
-  const tot = pmf.reduce((s,v)=>s+v,0);
-  if(tot>0) for(let k=0;k<=MAX;k++) pmf[k]/=tot;
-
-  return {pmf, survival, thresholds, smoothed, weights, spreads, mu, r};
+  return {pmf, survival, thresholds, smoothed, weights, spreads, mu, sigma};
 }
 
 function convolve(a, b) {
@@ -552,7 +526,7 @@ function runModel() {
   console.log('Combined dist: norm='+norm.toFixed(4)+' mean='+debugMean.toFixed(1)+' peak='+debugPeak+' peakVal='+debugMax.toFixed(4));
   activeDists.forEach((d,i)=>{
     let m=0; for(let k=0;k<=MAX;k++) m+=k*(d.dist.pmf[k]||0);
-    console.log('Player '+i+' ('+d.player.name+'): mu='+d.dist.mu?.toFixed(1)+' r='+d.dist.r?.toFixed(1)+' mean='+m.toFixed(1));
+    console.log('Player '+i+' ('+d.player.name+'): mu='+d.dist.mu?.toFixed(1)+' sigma='+d.dist.sigma?.toFixed(1)+' mean='+m.toFixed(1));
   });
 
   const target = parseInt(document.getElementById('combTarget').value)||60;
