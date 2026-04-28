@@ -97,14 +97,20 @@ def build_result(markets, search=""):
         if search and search not in normalize(player_name) and search not in player_name.lower():
             continue
 
-        yes_bid = m.get("yes_bid") or 0
-        yes_ask = m.get("yes_ask") or 0
-        last_price = m.get("last_price") or 0
+        # Prices come as dollars (0.28 = 28¢) in yes_bid_dollars / yes_ask_dollars
+        def to_cents(val):
+            if val is None: return 0
+            return int(round(float(val) * 100))
 
-        if isinstance(yes_bid, str): yes_bid = int(float(yes_bid) * 100)
-        if isinstance(yes_ask, str): yes_ask = int(float(yes_ask) * 100)
-        if isinstance(last_price, str): last_price = int(float(last_price) * 100)
+        yes_bid = to_cents(m.get("yes_bid_dollars") or m.get("yes_bid"))
+        yes_ask = to_cents(m.get("yes_ask_dollars") or m.get("yes_ask"))
+        last_price = to_cents(m.get("last_price_dollars") or m.get("last_price"))
 
+        # If bid is 0 but ask exists, estimate bid from no_ask
+        if yes_bid == 0 and yes_ask == 0:
+            no_ask = to_cents(m.get("no_ask_dollars") or m.get("no_ask"))
+            if no_ask > 0:
+                yes_bid = max(1, 100 - no_ask)
         if yes_bid == 0 and yes_ask == 0 and last_price > 0:
             yes_bid = max(1, last_price - 3)
             yes_ask = min(99, last_price + 3)
