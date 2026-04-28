@@ -368,7 +368,8 @@ body { background: var(--bg); color: var(--text); font-family: var(--body); min-
 </div>
 
 <script>
-const MAX = 80;
+const MAX = 80; // per-player max
+const MAX_COMBINED = 240; // combined max for 3 players
 const SLOT_COLORS = ['#7c6dfa','#38d9a0','#f5a623'];
 let slots = [null, null, null];
 let books = [
@@ -530,11 +531,13 @@ function buildDist(props) {
 }
 
 function convolve(a, b) {
-  const out = new Float64Array(MAX+1).fill(0);
-  for(let i=0;i<=MAX;i++) {
+  const maxOut = MAX_COMBINED;
+  const out = new Float64Array(maxOut+1).fill(0);
+  for(let i=0;i<a.length;i++) {
     if(!a[i]) continue;
-    for(let j=0;j<=MAX-i;j++) {
-      out[Math.min(MAX,i+j)] += a[i]*b[j];
+    for(let j=0;j<b.length;j++) {
+      const k = i+j;
+      if(k <= maxOut) out[k] += a[i]*b[j];
     }
   }
   return out;
@@ -557,11 +560,11 @@ function runModel() {
   let combined = activeDists[0].dist.pmf.slice();
   for(let i=1;i<activeDists.length;i++) combined = convolve(combined, activeDists[i].dist.pmf);
   const norm = combined.reduce((s,v)=>s+v,0);
-  if(norm>0) for(let k=0;k<=MAX;k++) combined[k]/=norm;
+  if(norm>0) for(let k=0;k<combined.length;k++) combined[k]/=norm;
 
   const target = parseInt(document.getElementById('combTarget').value)||60;
   let modelProb = 0;
-  for(let k=target;k<=MAX;k++) modelProb+=combined[k];
+  for(let k=target;k<combined.length;k++) modelProb+=combined[k];
   modelProb = Math.min(1,Math.max(0,modelProb));
 
   let mean=0, variance=0;
@@ -656,9 +659,10 @@ function clearResults() {
 
 function updateChart(combined, activeDists, target) {
   const labels=[], combDataGreen=[], combDataGray=[];
-  for(let k=0;k<=MAX;k++) {
+  const chartMax = Math.min(combined.length-1, MAX_COMBINED);
+  for(let k=0;k<=chartMax;k++) {
     labels.push(k);
-    const pct = parseFloat((combined[k]*100).toFixed(3));
+    const pct = parseFloat(((combined[k]||0)*100).toFixed(3));
     combDataGreen.push(k>=target?pct:null);
     combDataGray.push(k<target?pct:null);
   }
