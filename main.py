@@ -178,6 +178,15 @@ def get_markets():
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
+@app.route("/api/debug/prices")
+def debug_prices():
+    try:
+        resp = kalshi_get("/trade-api/v2/markets", {"series_ticker": "KXNBAPTS", "status": "open", "limit": 5})
+        markets = resp.get("markets", [])
+        return jsonify([{k: v for k, v in m.items()} for m in markets[:3]])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/debug/events")
 def debug_events():
     try:
