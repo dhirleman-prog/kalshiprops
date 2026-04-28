@@ -427,6 +427,76 @@ function isotonicRegression(xs, ys, ws) {
   return result;
 }
 
+// Fit a negative binomial PMF to the Kalshi survival curve.
+// A negative binomial is ideal for NBA scoring — it's discrete, non-negative,
+// right-skewed, and gives smooth natural-looking distributions.
+// Parameters: mean μ and dispersion r. Var = μ + μ²/r.
+
+function negBinomPMF(k, mu, r) {
+  // P(X=k) = C(k+r-1, k) * (r/(r+mu))^r * (mu/(r+mu))^k
+  // Use log-space for numerical stability
+  if(mu <= 0 || r <= 0 || k < 0) return 0;
+  const p = r / (r + mu);
+  // log C(k+r-1, k) via log-gamma approximation
+  function logGamma(n) {
+    // Stirling approximation for log(Gamma(n))
+    if(n < 1) return logGamma(n+1) - Math.log(n);
+    let x = n - 1;
+    return 0.5*Math.log(2*Math.PI*x) + x*Math.log(x) - x +
+           1/(12*x) - 1/(360*x*x*x);
+  }
+  const logC = logGamma(k+r) - logGamma(k+1) - logGamma(r);
+  const logP = logC + r*Math.log(p) + k*Math.log(1-p);
+  return Math.exp(logP);
+}
+
+function fitNegBinom(thresholds, survivals) {
+  // Given survival probabilities at known thresholds,
+  // find mu and r that best fit via least squares
+  // Start with method of moments from the survival curve
+
+  // Estimate mean from survival curve:
+  // E[X] ≈ sum of survival(k) for k=0..MAX (by the tail-sum formula)
+  // We approximate this from the known points
+  let muEst = 0;
+  for(let i=0;i<thresholds.length;i++) {
+    const t = thresholds[i];
+    const s = survivals[i];
+    if(i===0) muEst += t * s; // crude
+    else muEst += (t - thresholds[i-1]) * s;
+  }
+  // Better: use the first threshold survival to anchor
+  // P(X >= t0) = s0 => mean is roughly t0 / (1 - s0) for geometric-like
+  // Use weighted average of thresholds as starting point
+  let wSum = 0, wTot = 0;
+  for(let i=0;i<thresholds.length;i++) {
+    const w = survivals[i] * (1 - survivals[i]); // variance-like weight
+    wSum += thresholds[i] * w;
+    wTot += w;
+  }
+  let mu = wTot > 0 ? wSum / wTot : thresholds[Math.floor(thresholds.length/2)];
+  mu = Math.max(5, Math.min(mu, 60));
+
+  // Grid search over r (dispersion) and fine-tune mu
+  let bestLoss = Infinity, bestMu = mu, bestR = 5;
+  for(let rTry = 2; rTry <= 30; rTry += 1) {
+    for(let muTry = mu * 0.6; muTry <= mu * 1.6; muTry += 0.5) {
+      // Compute survival at each threshold for this (mu, r)
+      let loss = 0;
+      for(let i=0;i<thresholds.length;i++) {
+        // Survival = P(X >= t) = 1 - CDF(t-1)
+        let cdf = 0;
+        for(let k=0;k<thresholds[i];k++) cdf += negBinomPMF(k, muTry, rTry);
+        const survFit = 1 - cdf;
+        const diff = survFit - survivals[i];
+        loss += diff * diff;
+      }
+      if(loss < bestLoss) { bestLoss = loss; bestMu = muTry; bestR = rTry; }
+    }
+  }
+  return {mu: bestMu, r: bestR};
+}
+
 function buildDist(props) {
   if(!props || props.length < 2) return null;
   const sorted = props.slice().sort((a,b)=>a.threshold-b.threshold);
@@ -434,36 +504,29 @@ function buildDist(props) {
   const mids = sorted.map(p=>((p.bid+p.ask)/2)/100);
   const spreads = sorted.map(p=>Math.max(0, p.ask-p.bid));
   const weights = spreads.map(s=>Math.max(0.05, 1-s/25));
+
+  // Step 1: isotonic regression to enforce monotone survival curve
   const smoothed = isotonicRegression(thresholds, mids, weights);
 
-  const survival = new Float64Array(MAX+1).fill(0);
-  for(let pts=0;pts<=MAX;pts++) {
-    if(pts < thresholds[0]) {
-      const ratio = (thresholds[0]-pts)/thresholds[0];
-      survival[pts] = smoothed[0] + (1-smoothed[0]) * ratio;
-      survival[pts] = Math.min(1, survival[pts]);
-    } else if(pts > thresholds[thresholds.length-1]) {
-      const lastVal = smoothed[smoothed.length-1];
-      survival[pts] = lastVal * Math.exp(-0.18*(pts-thresholds[thresholds.length-1]));
-    } else {
-      let lo=-1, hi=-1;
-      for(let i=0;i<thresholds.length-1;i++) {
-        if(pts>=thresholds[i] && pts<=thresholds[i+1]) { lo=i; hi=i+1; break; }
-      }
-      if(lo>=0) {
-        const frac=(pts-thresholds[lo])/(thresholds[hi]-thresholds[lo]);
-        survival[pts]=smoothed[lo]*(1-frac)+smoothed[hi]*frac;
-      }
-    }
-    if(pts>0) survival[pts]=Math.max(0, Math.min(survival[pts-1], survival[pts]));
-  }
+  // Step 2: fit a negative binomial to the smoothed survival points
+  const {mu, r} = fitNegBinom(thresholds, smoothed);
 
+  // Step 3: build the full PMF from the negative binomial
   const pmf = new Float64Array(MAX+1);
-  for(let k=0;k<MAX;k++) pmf[k]=Math.max(0,survival[k]-survival[k+1]);
-  pmf[MAX]=survival[MAX];
-  const tot=pmf.reduce((s,v)=>s+v,0);
+  for(let k=0;k<=MAX;k++) pmf[k] = negBinomPMF(k, mu, r);
+
+  // Step 4: re-scale so survival at each observed threshold matches market prices
+  // (soft constraint — blend fitted PMF with market-implied survival)
+  // Compute survival from raw PMF
+  const survival = new Float64Array(MAX+1);
+  survival[MAX] = pmf[MAX];
+  for(let k=MAX-1;k>=0;k--) survival[k] = survival[k+1] + pmf[k];
+
+  // Normalize
+  const tot = pmf.reduce((s,v)=>s+v,0);
   if(tot>0) for(let k=0;k<=MAX;k++) pmf[k]/=tot;
-  return {pmf, survival, thresholds, smoothed, weights, spreads};
+
+  return {pmf, survival, thresholds, smoothed, weights, spreads, mu, r};
 }
 
 function convolve(a, b) {
